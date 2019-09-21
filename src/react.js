@@ -14,6 +14,7 @@ function render(element, container) {
     let unit = createUnit(element);
     let markUp = unit.getMarkUp(0);
     $(container).html(markUp);
+    $(document).trigger('mounted');
 }
 
 
