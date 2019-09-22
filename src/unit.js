@@ -1,5 +1,8 @@
 import { Element, createElement } from './element'
+import types from './types'
 import $ from 'jquery';
+let diffQueue = []; // 差异队列
+let updateDeth = 0; // 更新的级别
 class Unit {
     constructor(element) {
         this._currentElement = element;
@@ -26,10 +29,92 @@ class TextUnit extends Unit {
 </button> */}
 class NativeUnit extends Unit {
     update(nextElement) {
-        debugger
+        console.log(nextElement)
         let oldProps = this._currentElement.props;
         let newProps = nextElement.props;
         this.updateDOMPropertise(oldProps, newProps);
+        this.updateDOMChildren(nextElement.props.children);
+    }
+    //此处要把新的儿子们传过来，然后我把我的老儿子进行对比，然后找出差异，进行修改DOM
+    updateDOMChildren(newChildrenElements) {
+        this.diff(diffQueue, newChildrenElements);
+        console.log(diffQueue)
+    }
+    diff(diffQueue, newChildrenElements) {
+        // 生成一个map, key=老的unit
+        let oldChildrenUnitMap = this.getOldChilrenMap(this._renderedChildrenUnits);
+        // 生成一个新的儿子unit的数组
+        let { newChildrenUnits, newChildrenUnitMap } = this.getNewChildrenUnits(oldChildrenUnitMap, newChildrenElements);
+        let lastIndex = 0; // 上一个已经确定的索引
+        for (let i = 0; i < newChildrenUnits.length; i++) {
+            let newUnit  = newChildrenUnits[i];
+            let newKey = (newUnit._currentElement.props && newUnit._currentElement.props.key) || i.toString();
+            let oldChildUnit = oldChildrenUnitMap[newKey];
+            if (oldChildUnit === newUnit) { // 如果一致， 说明复用老节点
+                if (oldChildUnit._mountIndex < lastIndex) {
+                    diffQueue.push({
+                        parentId: this._reacid,
+                        parentNode: $(`[data-reactid="${this._reacid}"]`),
+                        type: types.MOVE,
+                        fromIndex: oldChildUnit._mountIndex,
+                        toIndex: i
+                    })
+                }
+                lastIndex = Math.max(lastIndex, oldChildUnit._mountIndex);
+            }else {
+                diffQueue.push({
+                    parentId: this._reacid,
+                    parentNode: $(`[data-reactid="${this._reacid}"]`),
+                    type: types.INSERT,
+                    toIndex: i,
+                    markUp: newUnit.getMarkUp(`${this._reacid}.${i}`)
+                })
+            }
+            newUnit._mountIndex = i;
+        }
+        for(let oldKey in oldChildrenUnitMap) {
+            let oldChild = oldChildrenUnitMap[oldKey];
+            if (!newChildrenUnitMap.hasOwnProperty(oldKey)) {
+                diffQueue.push({
+                    parentId: this._reacid,
+                    parentNode: $(`[data-reactid="${this._reacid}"]`),
+                    type: types.REMOVE,
+                    fromIndex: oldChild._mountIndex
+                })
+            }
+        }
+
+    }
+    getNewChildrenUnits(oldChildrenUnitMap, newChildrenElements) {
+        let newChildrenUnits = [];
+        let newChildrenUnitMap = {};
+        newChildrenElements.forEach((newElement, i) => {
+            let newKey = (newElement.props && newElement.props.key) || i.toString();
+            let oldUnit = oldChildrenUnitMap[newKey]; // 找到老的unit
+            let oldElement = oldUnit && oldUnit._currentElement; // 获取老元素
+            if(shouldDeepCompare(oldElement, newElement)) {
+                oldUnit.update(newElement);
+                newChildrenUnits.push(oldUnit);
+                newChildrenUnitMap[newKey] = oldUnit;
+            }else {
+                let nextUnit = createUnit(newElement);
+                newChildrenUnits.push(nextUnit);
+                newChildrenUnitMap[newKey] = nextUnit;
+            }
+        })
+        return {
+            newChildrenUnits,
+            newChildrenUnitMap
+        };
+    }
+    getOldChilrenMap(childrenUnits = []) {
+        let map = {};
+        for(let i=0; i<childrenUnits.length; i++) {
+            let unit=  childrenUnits[i];
+            let key = (unit._currentElement.props && unit._currentElement.props.key) || i.toString();
+            map[key] = unit;
+        }
+        return map;
     }
     updateDOMPropertise(oldProps, newProps) {
         let propName;
@@ -65,6 +150,7 @@ class NativeUnit extends Unit {
         let tagStart = `<${type} data-reactid="${reacid}"`;
         let childString = '';
         let tagEnd = `</${type}>`;
+        this._renderedChildrenUnits = [];
         for(let propsName in props) {
             if (/^on[A-Z]/.test(propsName)) { // 时间绑定
                 let eventName = propsName.slice(2).toLowerCase(); // click
@@ -81,6 +167,8 @@ class NativeUnit extends Unit {
                 let children = props[propsName];
                 children.forEach((child, index) => {
                     let childUnit = createUnit(child);
+                    childUnit._mountIndex = index; // 每个unit有一个_mountIndex属性，指向自己在父节点中的位置
+                    this._renderedChildrenUnits.push(childUnit);
                     let childMarkUp = childUnit.getMarkUp(`${this._reacid}.${index}`);
                     childString += childMarkUp;
                 })
