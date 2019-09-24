@@ -37,8 +37,47 @@ class NativeUnit extends Unit {
     }
     //此处要把新的儿子们传过来，然后我把我的老儿子进行对比，然后找出差异，进行修改DOM
     updateDOMChildren(newChildrenElements) {
+        updateDeth++;
         this.diff(diffQueue, newChildrenElements);
-        console.log(diffQueue)
+        updateDeth--;
+        if (updateDeth === 0) {
+            this.patch(diffQueue);
+            diffQueue = [];
+        }
+    }
+    patch(diffQueue) {
+        let deleteChildren = []; // 这里要放着所有将要删除的节点
+        let deleteMap = {}; // 这里暂存能复用的节点
+        for(let i = 0; i < diffQueue.length; i++) {
+            let difference = diffQueue[i];
+            if (difference.type === types.MOVE || difference.type === types.REMOVE) {
+                let fromIndex = difference.fromIndex;
+                let oldChild = $(difference.parentNode.children().get(fromIndex));
+                deleteMap[fromIndex] = oldChild;
+                deleteChildren.push(oldChild);
+            }
+        }
+        $.each(deleteChildren, (idx, item) => {
+            $(item).remove();
+        })
+
+        for(let i = 0; i < diffQueue.length; i++) {
+            let difference = diffQueue[i];
+            switch (difference.type) {
+                case types.INSERT:
+                    this.insertChildAt(difference.parentNode, difference.toIndex, $(difference.markUp));
+                    break;
+                case types.MOVE:
+                    this.insertChildAt(difference.parentNode, difference.toIndex, deleteMap[difference.fromIndex]);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    insertChildAt(parentNode, index, newNode) {
+        let oldChild = parentNode.children().get(index);
+        oldChild ? newNode.insertBefore(oldChild):newNode.appendTo(parentNode);
     }
     diff(diffQueue, newChildrenElements) {
         // 生成一个map, key=老的unit
